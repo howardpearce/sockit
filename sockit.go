@@ -2,64 +2,79 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"net"
 	"os"
-	"strings"
 	"syscall"
 )
 
 var block bool = false
 
 func main() {
-	if len(os.Args) < 3 {
-		fmt.Printf("Please provide two paths as input.\n")
+	if len(os.Args) < 4 {
+		fmt.Printf("Please provide three paths as input.\n")
 		os.Exit(1)
 	}
 
-	bindSocketPath := os.Args[1]
-	dialSocketPath := os.Args[2]
+	receiveSocketPath := os.Args[1]
+	sendSocketPath := os.Args[2]
+	controlSocketPath := os.Args[3]
 
-	unlinkIfExists(bindSocketPath)
-	unlinkIfExists(dialSocketPath)
+	unlinkIfExists(receiveSocketPath)
+	unlinkIfExists(controlSocketPath)
 
-	fmt.Println("Listening on sockets:", bindSocketPath, ",", dialSocketPath)
+	fmt.Println("Receiving messages on", receiveSocketPath, "and forwarding them to", sendSocketPath)
 
-	bindSocket := must(net.Listen("unix", bindSocketPath))
+	receiveSocket := must(net.Listen("unix", receiveSocketPath))
+	controlSocket := must(net.Listen("unix", controlSocketPath))
 
 	go func() {
 		for {
 
-			// Receive A message
-			bindConn := must(bindSocket.Accept())
+			// Receive a message
+			receiveConn := must(receiveSocket.Accept())
 			buf := make([]byte, 4096)
-			n := must(bindConn.Read(buf))
+			n := must(receiveConn.Read(buf))
 			fmt.Printf("Message Received size=%d: %s\n", n, string(buf[:]))
 
-			if block {
+			if !block {
+				sendSocket := must(net.Dial("unix", sendSocketPath))
+
 				// Forward the message
-				dialConn := must(net.Dial("unix", dialSocketPath))
 				fmt.Printf("Writing message to other socket.\n")
-				_, err := dialConn.Write(buf)
+				_, err := sendSocket.Write(buf)
 				if err != nil {
-					fmt.Printf("Error occurred when writing: %w\n", err)
+					fmt.Printf("Error occurred when writing: %w\n", err.Error())
 				}
-				dialConn.Close()
+
+				sendBuf := make([]byte, 4096)
+				n, err := sendSocket.Read(sendBuf)
+				fmt.Println("Received response:", string(sendBuf[0:n]))
+				fmt.Println("Returning response to receiver")
+				receiveConn.Write(sendBuf[0:n])
+
+				sendSocket.Close()
+
+			} else {
+				fmt.Println("Block enabled. Not forwarding message.")
 			}
 
-			bindConn.Close()
+			receiveConn.Close()
+
 		}
 	}()
 
-	reader := bufio.NewReader(os.Stdin)
-
 	for {
-		text, _ := reader.ReadString('\n')
-		if strings.TrimRight(text, "\n") == "block" {
-			fmt.Printf("Setting block to %t\n", block)
+		controlConn := must(controlSocket.Accept())
+		buf := make([]byte, 4096)
+		n := must(controlConn.Read(buf))
+		fmt.Printf("Message Received on control socket size=%d: %s\n", n, string(buf[:]))
+
+		if string(buf[0:n]) == "block" {
 			block = !block
 		}
+
+		controlConn.Close()
 	}
 
 }

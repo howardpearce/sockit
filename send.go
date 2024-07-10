@@ -9,20 +9,22 @@ import (
 
 func main() {
 	socketPath := os.Args[1]
-	//msg := os.Args[2]
+	msg := os.Args[2]
 
-	//fmt.Printf("Sending message \"%s\" on socket: %s\n", msg, socketPath)
-
-	//socket := must(net.Listen("unix", socketPath))
+	fmt.Printf("Sending message \"%s\" on socket: %s\n", msg, socketPath)
 
 	conn := must(net.Dial("unix", socketPath))
 	defer conn.Close()
 
-	_, err := conn.Write([]byte("hello!"))
+	_, err := conn.Write([]byte(msg))
 
 	if err != nil {
 		fmt.Printf("Error occurred when writing: %w\n", err)
 	}
+
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
+	fmt.Println("Received response:", string(buf[0:n]))
 
 }
 
